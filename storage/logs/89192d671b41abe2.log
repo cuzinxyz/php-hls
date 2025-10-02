@@ -1,0 +1,1 @@
+[2025-10-02 10:10:11] Spawn (win): cmd.exe /C start "hls-transcode" /B "C:\laragon\bin\php\php-8.2.27-nts-Win32-vs16-x64\php-cgi.exe" "C:\laragon\www\hls\bin\transcode.php" "89192d671b41abe2" "C:\laragon\www\hls/storage/uploads\89192d671b41abe2.mp4"

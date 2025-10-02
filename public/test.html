@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HLS Upload Test</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+      .dropzone.dragover {
+        border-color: #3b82f6;
+        background: rgba(59, 130, 246, 0.05);
+      }
+    </style>
+  </head>
+  <body class="bg-gray-50 text-gray-900">
+    <div class="max-w-3xl mx-auto p-6">
+      <h1 class="text-2xl font-semibold mb-4">HLS Upload & Playback</h1>
+
+      <div
+        id="drop"
+        class="dropzone border-2 border-dashed rounded-lg p-6 bg-white flex flex-col items-center justify-center text-center"
+      >
+        <div class="text-gray-600 mb-2">Drag & drop a video file here</div>
+        <div class="text-sm text-gray-500">or</div>
+        <label
+          class="mt-2 inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700"
+        >
+          <input id="file" type="file" class="hidden" accept="video/*" />
+          Choose file
+        </label>
+      </div>
+
+      <div id="progressWrap" class="hidden mt-4">
+        <div class="flex justify-between text-sm mb-1">
+          <span id="progressLabel">Uploading...</span>
+          <span id="progressPct">0%</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2">
+          <div
+            id="progressBar"
+            class="bg-blue-600 h-2 rounded-full"
+            style="width: 0%"
+          ></div>
+        </div>
+      </div>
+
+      <div id="status" class="mt-4 text-sm text-gray-600"></div>
+
+      <div class="mt-6">
+        <video
+          id="video"
+          controls
+          class="w-full rounded-lg bg-black"
+          crossorigin="anonymous"
+        ></video>
+      </div>
+    </div>
+
+    <script>
+      const drop = document.getElementById("drop");
+      const input = document.getElementById("file");
+      const progressWrap = document.getElementById("progressWrap");
+      const progressBar = document.getElementById("progressBar");
+      const progressPct = document.getElementById("progressPct");
+      const progressLabel = document.getElementById("progressLabel");
+      const statusBox = document.getElementById("status");
+      const videoEl = document.getElementById("video");
+
+      ["dragenter", "dragover"].forEach((evt) =>
+        drop.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.add("dragover");
+        })
+      );
+      ["dragleave", "drop"].forEach((evt) =>
+        drop.addEventListener(evt, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          drop.classList.remove("dragover");
+        })
+      );
+      drop.addEventListener("drop", (e) => {
+        const f = e.dataTransfer.files[0];
+        if (f) upload(f);
+      });
+      input.addEventListener("change", (e) => {
+        const f = input.files[0];
+        if (f) upload(f);
+      });
+
+      async function upload(file) {
+        progressWrap.classList.remove("hidden");
+        progressLabel.textContent = "Uploading...";
+        setProgress(0);
+        statusBox.textContent = "";
+
+        const form = new FormData();
+        form.append("file", file);
+
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/upload");
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable)
+            setProgress(Math.round((e.loaded / e.total) * 100));
+        };
+        const job = await new Promise((resolve, reject) => {
+          xhr.onreadystatechange = () => {
+            if (xhr.readyState === XMLHttpRequest.DONE) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch (err) {
+                reject(err);
+              }
+            }
+          };
+          xhr.onerror = () => reject(new Error("Network error"));
+          xhr.send(form);
+        }).catch((err) => {
+          setStatus("Upload failed");
+          console.error(err);
+          return null;
+        });
+
+        if (!job || !job.job_id) {
+          return;
+        }
+        setProgress(100);
+        progressLabel.textContent = "Processing...";
+        await poll(job.status_url, job.manifest);
+      }
+
+      function setProgress(p) {
+        progressBar.style.width = p + "%";
+        progressPct.textContent = p + "%";
+      }
+
+      function setStatus(t) {
+        statusBox.textContent = t;
+      }
+
+      async function poll(statusUrl, manifest) {
+        let attempts = 0;
+        const maxAttempts = 600; // up to ~10 minutes if 1s
+        while (attempts++ < maxAttempts) {
+          try {
+            const r = await fetch(statusUrl);
+            const j = await r.json();
+            if (j.status === "completed") {
+              setStatus("Ready");
+              play(manifest);
+              return;
+            }
+            if (j.status === "failed") {
+              setStatus("Failed (exit " + (j.exit_code ?? "?") + ")");
+              return;
+            }
+            setStatus(j.status || "processing...");
+          } catch (e) {
+            setStatus("Waiting...");
+          }
+          await new Promise((res) => setTimeout(res, 1000));
+        }
+        setStatus("Timeout waiting for processing");
+      }
+
+      function play(src) {
+        if (Hls.isSupported()) {
+          const hls = new Hls({ lowLatencyMode: true });
+          hls.loadSource(src);
+          hls.attachMedia(videoEl);
+        } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+          videoEl.src = src;
+        } else {
+          setStatus("HLS not supported in this browser");
+        }
+        videoEl.play();
+      }
+    </script>
+  </body>
+</html>
