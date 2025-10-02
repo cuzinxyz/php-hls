@@ -4,17 +4,21 @@ declare(strict_types=1);
 
 // Simple front controller and router for the HLS service
 
-// Autoload (simple PSR-4 for Src\*)
+// Autoload (simple PSR-4 for Src\*), safe with open_basedir
 spl_autoload_register(function ($class): void {
 	$prefix = 'Src\\';
-	$baseDir = __DIR__ . '/../src/';
 	$len = strlen($prefix);
 	if (strncmp($prefix, $class, $len) !== 0) {
 		return; // not our namespace
 	}
+	$open = (string)ini_get('open_basedir');
+	$parent = dirname(__DIR__);
+	$parentAllowed = ($open === '') || (strpos($open, $parent) !== false) || (strpos($open, $parent . DIRECTORY_SEPARATOR) !== false);
+	$projectRoot = $parentAllowed ? $parent : __DIR__;
+	$baseDir = $projectRoot . '/src/';
 	$relativeClass = substr($class, $len);
 	$file = $baseDir . str_replace('\\', '/', $relativeClass) . '.php';
-	if (file_exists($file)) {
+	if (@file_exists($file)) {
 		require $file;
 	}
 });
@@ -24,8 +28,23 @@ use Src\Logger;
 use Src\Transcoder;
 use Src\JobRepository;
 
-// Initialize config and ensure directories
-$config = Config::load(__DIR__ . '/../config/app.php');
+// Initialize config and ensure directories, avoiding open_basedir violations
+$open = (string)ini_get('open_basedir');
+$parent = dirname(__DIR__);
+$parentAllowed = ($open === '') || (strpos($open, $parent) !== false) || (strpos($open, $parent . DIRECTORY_SEPARATOR) !== false);
+$projectRoot = $parentAllowed ? $parent : __DIR__;
+$configPath = $projectRoot . '/config/app.php';
+if (!@file_exists($configPath)) {
+	header('Content-Type: application/json');
+	http_response_code(500);
+	echo json_encode([
+		'error' => 'Config not accessible due to open_basedir',
+		'detail' => 'Allow parent directory in open_basedir or place config under public/config/app.php',
+		'expected' => $configPath,
+	]);
+	exit;
+}
+$config = Config::load($configPath);
 Logger::ensureDirectories($config);
 JobRepository::ensureDirectories($config);
 
