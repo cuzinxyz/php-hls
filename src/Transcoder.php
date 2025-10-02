@@ -20,6 +20,14 @@ final class Transcoder
 		$root = rtrim($this->config['paths']['root'], DIRECTORY_SEPARATOR);
 		$script = $root . DIRECTORY_SEPARATOR . 'bin' . DIRECTORY_SEPARATOR . 'transcode.php';
 		$cmd = '"' . $php . '" ' . escapeshellarg($script) . ' ' . escapeshellarg($jobId) . ' ' . escapeshellarg($inputPath);
+
+		// Fallback when worker script is not accessible (e.g., open_basedir limits outside public)
+		if (!@is_file($script) || !@is_readable($script)) {
+			$this->logger->log('Worker script not accessible, running transcodeSync inline');
+			self::ignoreUserAbort();
+			$this->transcodeSync($jobId, $inputPath);
+			return;
+		}
 		if (Config::osIsWindows()) {
 			// Use cmd to spawn detached background process on Windows
 			$background = 'cmd.exe /C start "hls-transcode" /B ' . $cmd;
@@ -135,6 +143,17 @@ final class Transcoder
 			return 'php.exe';
 		}
 		return 'php';
+	}
+
+	private static function ignoreUserAbort(): void
+	{
+		if (function_exists('ignore_user_abort')) {
+			@ignore_user_abort(true);
+		}
+		if (PHP_SAPI !== 'cli') {
+			@ini_set('max_execution_time', '0');
+			@set_time_limit(0);
+		}
 	}
 }
 
